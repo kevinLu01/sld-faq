@@ -1,13 +1,20 @@
 import json
-import os
+import re
 from pathlib import Path
 from app.config import settings
 
 _CONV_DIR = Path("data/conversations")
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 
 def _session_path(session_id: str) -> Path:
-    return _CONV_DIR / f"{session_id}.json"
+    # P0: reject non-UUID session_ids to prevent path traversal
+    if not _UUID_RE.match(session_id):
+        raise ValueError(f"Invalid session_id format: {session_id!r}")
+    path = (_CONV_DIR / f"{session_id}.json").resolve()
+    if not path.is_relative_to(_CONV_DIR.resolve()):
+        raise ValueError("Path traversal detected")
+    return path
 
 
 def load_conversation_history(session_id: str) -> list[dict]:

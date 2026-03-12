@@ -1,3 +1,4 @@
+import operator
 from typing import TypedDict, Annotated, Optional
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
@@ -21,8 +22,9 @@ class AgentState(TypedDict):
     refined_query: Optional[str]
 
     # Tool routing
-    tools_to_use: list[str]   # planner populates: ["vector_search", "tavily_search", ...]
-    tools_used: list[str]     # tracks what has already run
+    tools_to_use: list[str]
+    # P1: operator.add reducer prevents last-write-wins in parallel tool nodes
+    tools_used: Annotated[list[str], operator.add]
 
     # Retrieved context per source
     vector_results: list[dict]

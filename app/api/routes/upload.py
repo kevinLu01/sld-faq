@@ -36,12 +36,19 @@ async def upload_file(
     upload_dir = Path(settings.UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    save_path = str(upload_dir / f"{uuid4()}_{file.filename}")
-    contents = await file.read()
+    # P0: strip directory components from filename to prevent path traversal
+    safe_name = Path(file.filename or "upload").name
+    save_path = upload_dir / f"{uuid4()}_{safe_name}"
+
+    # P0: enforce 50 MB upload limit before reading into memory
+    MAX_BYTES = 50 * 1024 * 1024
+    contents = await file.read(MAX_BYTES + 1)
+    if len(contents) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 50 MB).")
 
     await asyncio.to_thread(Path(save_path).write_bytes, contents)
 
-    background_tasks.add_task(ingest_file, save_path, file.filename, mime_type)
+    background_tasks.add_task(ingest_file, str(save_path), safe_name, mime_type)
 
     return UploadResponse(
         status="ingesting",

@@ -1,5 +1,6 @@
 import json
 import re
+from functools import lru_cache
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from app.config import settings
@@ -10,7 +11,9 @@ from app.tools.tavily_search import tavily_search
 from app.tools.url_fetch import url_fetch
 
 
+@lru_cache(maxsize=1)
 def _get_llm() -> ChatAnthropic:
+    """Singleton LLM client — avoids re-initializing connection pool on every call."""
     return ChatAnthropic(
         model=settings.CLAUDE_MODEL,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
@@ -21,10 +24,11 @@ def _get_llm() -> ChatAnthropic:
 
 
 def _format_history(history: list[dict]) -> str:
+    # Truncation is already applied by load_conversation_history; no need to re-slice
     if not history:
         return ""
     lines = ["## Prior conversation\n"]
-    for turn in history[-settings.MAX_CONVERSATION_HISTORY_TURNS * 2:]:
+    for turn in history:
         role = "User" if turn["role"] == "user" else "Assistant"
         lines.append(f"**{role}**: {turn['content']}\n")
     return "\n".join(lines)
@@ -88,8 +92,9 @@ async def tavily_search_node(state: AgentState) -> dict:
 async def url_fetch_node(state: AgentState) -> dict:
     """Fetch URLs found in the query or in web results."""
     import re as _re
-    query = state["query"]
-    urls = _re.findall(r"https?://[^\s]+", query)
+    query = state.get("refined_query") or state["query"]
+    # Exclude trailing punctuation from matched URLs
+    urls = _re.findall(r"https?://[^\s,;，。\)）]+", query)
 
     url_results = []
     for url in urls[:3]:  # cap at 3 URLs per turn
@@ -113,7 +118,8 @@ async def grader(state: AgentState) -> dict:
         + len(state.get("web_results") or [])
         + len(state.get("url_results") or [])
     )
-    needs_more = total == 0 and state.get("iteration_count", 1) < state.get("max_iterations", 3)
+    # Iteration limit is enforced solely in route_after_grader to avoid duplicated logic
+    needs_more = total == 0
     return {"needs_more_research": needs_more}
 
 
@@ -212,4 +218,6 @@ async def responder(state: AgentState) -> dict:
 
     return {
         "messages": [AIMessage(content=answer)],
+        # P1: re-emit citations so WebSocket stream.py can read them from on_chain_end
+        "citations": state.get("citations", []),
     }

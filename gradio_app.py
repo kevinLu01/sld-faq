@@ -23,16 +23,7 @@ graph = build_graph()
 
 def _run(coro):
     """Run an async coroutine from sync Gradio handlers."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-        return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
+    return asyncio.run(coro)
 
 
 def _format_citations(citations: list) -> str:
@@ -101,9 +92,9 @@ async def _stream_query(query: str, session_id: str, history: list, max_iter: in
         elif etype == "on_chat_model_stream":
             chunk = event["data"].get("chunk")
             if chunk and chunk.content:
-                # Only stream tokens from synthesizer (skip planner tokens)
-                node_tags = event.get("tags", [])
-                if "synthesizer" in str(event.get("metadata", {})).lower() or not partial:
+                # P1: use langgraph_node metadata for precise node filtering
+                node = event.get("metadata", {}).get("langgraph_node", "")
+                if node == "synthesizer":
                     partial += chunk.content
                     cur_history = history + [[query, partial]]
                     yield cur_history, status
@@ -118,36 +109,23 @@ async def _stream_query(query: str, session_id: str, history: list, max_iter: in
 
 
 def chat(query: str, history: list, session_id: str, max_iter: int):
-    """Sync wrapper for Gradio — streams via generator."""
+    """Sync wrapper for Gradio — bridges async generator to sync yield."""
     if not query.strip():
         yield history, session_id, ""
         return
 
-    async def _gen():
-        results = []
-        async for h, s in _stream_query(query, session_id, history, max_iter):
-            results.append((h, s))
-        return results
-
-    # Stream synchronously
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    async def _run_gen():
-        async for h, s in _stream_query(query, session_id, history, int(max_iter)):
-            yield h, s
-
     import queue
+    import threading
+
     q: queue.Queue = queue.Queue()
 
     def _thread():
         async def _collect():
-            async for item in _run_gen():
+            async for item in _stream_query(query, session_id, history, int(max_iter)):
                 q.put(item)
             q.put(None)  # sentinel
         asyncio.run(_collect())
 
-    import threading
     t = threading.Thread(target=_thread, daemon=True)
     t.start()
 

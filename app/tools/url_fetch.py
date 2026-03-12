@@ -1,6 +1,24 @@
 from langchain_core.tools import tool
 
 
+def _assert_safe_url(url: str) -> None:
+    """P0: Block SSRF by rejecting private/loopback/link-local targets."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Disallowed URL scheme: {parsed.scheme!r}")
+    host = parsed.hostname or ""
+    try:
+        ip = ipaddress.ip_address(socket.gethostbyname(host))
+    except Exception as exc:
+        raise ValueError(f"Cannot resolve host {host!r}: {exc}") from exc
+    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved:
+        raise ValueError(f"Requests to private/internal addresses are not allowed: {ip}")
+
+
 @tool
 async def url_fetch(url: str, max_chars: int = 8000) -> dict:
     """
@@ -12,7 +30,9 @@ async def url_fetch(url: str, max_chars: int = 8000) -> dict:
     from bs4 import BeautifulSoup
 
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        _assert_safe_url(url)  # P0: SSRF guard
+
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
             response = await client.get(
                 url, headers={"User-Agent": "ResearchAgent/1.0"}
             )

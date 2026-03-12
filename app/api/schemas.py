@@ -1,13 +1,21 @@
 from typing import Optional
 from uuid import uuid4
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.agent.state import SourceCitation
 
 
 class QueryRequest(BaseModel):
-    query: str
+    query: str = Field(..., min_length=1, max_length=2000)
     session_id: str = Field(default_factory=lambda: str(uuid4()))
     max_iterations: int = Field(default=3, ge=1, le=5)
+
+    @field_validator("query")
+    @classmethod
+    def strip_and_validate_query(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("query cannot be blank")
+        return v
 
 
 class QueryResponse(BaseModel):

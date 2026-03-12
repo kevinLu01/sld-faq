@@ -1,4 +1,3 @@
-import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage
 
@@ -30,7 +29,8 @@ async def websocket_query(websocket: WebSocket):
 
     query = data.get("query", "").strip()
     session_id = data.get("session_id", "default")
-    max_iterations = int(data.get("max_iterations", 3))
+    # P1: clamp max_iterations to [1, 5] to prevent runaway API spend
+    max_iterations = min(max(int(data.get("max_iterations", 3)), 1), 5)
 
     if not query:
         await websocket.send_json({"type": "error", "message": "Query cannot be empty."})
@@ -64,16 +64,18 @@ async def websocket_query(websocket: WebSocket):
         async for event in graph.astream_events(initial_state, config=config, version="v2"):
             event_type = event.get("event")
 
-            # Stream LLM tokens (only from synthesizer / planner nodes)
             if event_type == "on_chat_model_stream":
                 chunk = event["data"].get("chunk")
                 if chunk and chunk.content:
-                    await websocket.send_json({"type": "token", "content": chunk.content})
+                    # P1: only stream tokens from the synthesizer node
+                    node = event.get("metadata", {}).get("langgraph_node", "")
+                    if node == "synthesizer":
+                        await websocket.send_json({"type": "token", "content": chunk.content})
 
-            # Send citations when responder node completes
+            # P1: responder now re-emits citations in its return dict
             elif event_type == "on_chain_end" and event.get("name") == "responder":
-                output = event["data"].get("output", {})
                 if not citations_sent:
+                    output = event["data"].get("output", {})
                     citations = output.get("citations", [])
                     await websocket.send_json({"type": "citations", "data": citations})
                     citations_sent = True

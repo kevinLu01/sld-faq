@@ -19,9 +19,14 @@ async def vector_search(query: str, k: int = 6) -> list[dict]:
     chroma = get_chroma_client()
     collection = chroma.get_or_create_collection(settings.CHROMA_COLLECTION)
 
+    # P1: return early if collection is empty to avoid Chroma crash
+    count = collection.count()
+    if count == 0:
+        return []
+
     results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=min(k, max(collection.count(), 1)),
+        n_results=min(k, count),
         include=["documents", "metadatas", "distances"],
     )
 
