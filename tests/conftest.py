@@ -13,7 +13,16 @@
 import os
 import sys
 import types
+from unittest.mock import MagicMock
 import pytest
+
+# ---------------------------------------------------------------------------
+# Set required env vars BEFORE any app module is imported (including at
+# collection time by test_gradio.py's module-level patch() calls).
+# ---------------------------------------------------------------------------
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-for-testing")
+os.environ.setdefault("TAVILY_API_KEY", "test-tavily-key")
+os.environ.setdefault("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
 # ---------------------------------------------------------------------------
 # Ensure the project root is on sys.path so `import app.*` works regardless
@@ -60,6 +69,23 @@ sys.modules["langchain_community.document_loaders"] = _lce_doc
 # tavily
 _tav = _make_stub_module("tavily")
 _tav.TavilyClient = object
+
+# gradio — stub out so test_gradio.py can patch without installing the full package
+_gr = _make_stub_module("gradio")
+_gr.Blocks = MagicMock
+_gr.Chatbot = MagicMock
+_gr.Textbox = MagicMock
+_gr.Button = MagicMock
+_gr.Slider = MagicMock
+_gr.File = MagicMock
+_gr.Row = MagicMock
+_gr.Tab = MagicMock
+_gr.Tabs = MagicMock
+_gr.Markdown = MagicMock
+_gr.State = MagicMock
+_gr_themes = _make_stub_module("gradio.themes")
+_gr_themes.Soft = MagicMock
+_gr.themes = _gr_themes
 
 # langchain_community.document_loaders sub-modules used by loaders.py
 # (already registered above via the parent stub)

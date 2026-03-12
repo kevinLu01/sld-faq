@@ -12,7 +12,23 @@
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import patch
+
+# Pre-defined valid UUIDs for use as session_ids (P0: _session_path now requires UUID format)
+_UUID_MISSING   = "00000000-0000-0000-0000-000000000001"
+_UUID_EXISTING  = "00000000-0000-0000-0000-000000000002"
+_UUID_TRUNCATE  = "00000000-0000-0000-0000-000000000003"
+_UUID_CORRUPT   = "00000000-0000-0000-0000-000000000004"
+_UUID_EMPTY     = "00000000-0000-0000-0000-000000000005"
+_UUID_EXACT     = "00000000-0000-0000-0000-000000000006"
+_UUID_NEW       = "00000000-0000-0000-0000-000000000007"
+_UUID_CONTENT   = "00000000-0000-0000-0000-000000000008"
+_UUID_APPEND_S2 = "00000000-0000-0000-0000-000000000009"
+_UUID_CITE      = "00000000-0000-0000-0000-000000000010"
+_UUID_TRIM      = "00000000-0000-0000-0000-000000000011"
+_UUID_AUTODIR   = "00000000-0000-0000-0000-000000000012"
+_UUID_SESS_A    = "00000000-0000-0000-0000-000000000013"
+_UUID_SESS_B    = "00000000-0000-0000-0000-000000000014"
+_UUID_UNICODE   = "00000000-0000-0000-0000-000000000015"
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +66,7 @@ class TestLoadConversationHistory:
         """Missing session file should return an empty list, not raise."""
         _redirect_conv_dir(tmp_path, monkeypatch)
         from app.memory.conversation import load_conversation_history
-        result = load_conversation_history("no-such-session")
+        result = load_conversation_history(_UUID_MISSING)
         assert result == []
 
     def test_loads_existing_session(self, tmp_path, monkeypatch):
@@ -60,10 +76,10 @@ class TestLoadConversationHistory:
             {"role": "user", "content": "Hi"},
             {"role": "assistant", "content": "Hello!", "citations": []},
         ]
-        _write_session(conv_dir, "sess-1", turns)
+        _write_session(conv_dir, _UUID_EXISTING, turns)
 
         from app.memory.conversation import load_conversation_history
-        result = load_conversation_history("sess-1")
+        result = load_conversation_history(_UUID_EXISTING)
         assert result == turns
 
     def test_truncates_to_max_history_turns(self, tmp_path, monkeypatch, mock_settings):
@@ -77,10 +93,10 @@ class TestLoadConversationHistory:
         for i in range(5):
             turns.append({"role": "user", "content": f"q{i}"})
             turns.append({"role": "assistant", "content": f"a{i}", "citations": []})
-        _write_session(conv_dir, "sess-2", turns)
+        _write_session(conv_dir, _UUID_TRUNCATE, turns)
 
         from app.memory.conversation import load_conversation_history
-        result = load_conversation_history("sess-2")
+        result = load_conversation_history(_UUID_TRUNCATE)
 
         max_entries = mock_settings.MAX_CONVERSATION_HISTORY_TURNS * 2  # = 6
         assert len(result) == max_entries
@@ -91,20 +107,20 @@ class TestLoadConversationHistory:
         """A corrupt JSON file should return [] rather than raise."""
         conv_dir = _redirect_conv_dir(tmp_path, monkeypatch)
         conv_dir.mkdir(parents=True, exist_ok=True)
-        bad_file = conv_dir / "bad-sess.json"
+        bad_file = conv_dir / f"{_UUID_CORRUPT}.json"
         bad_file.write_text("{not valid json", encoding="utf-8")
 
         from app.memory.conversation import load_conversation_history
-        result = load_conversation_history("bad-sess")
+        result = load_conversation_history(_UUID_CORRUPT)
         assert result == []
 
     def test_returns_empty_list_on_empty_json_array(self, tmp_path, monkeypatch):
         """An empty JSON array in the file returns an empty list."""
         conv_dir = _redirect_conv_dir(tmp_path, monkeypatch)
-        _write_session(conv_dir, "empty-sess", [])
+        _write_session(conv_dir, _UUID_EMPTY, [])
 
         from app.memory.conversation import load_conversation_history
-        result = load_conversation_history("empty-sess")
+        result = load_conversation_history(_UUID_EMPTY)
         assert result == []
 
     def test_exactly_at_limit_returns_all_entries(self, tmp_path, monkeypatch, mock_settings):
@@ -112,10 +128,10 @@ class TestLoadConversationHistory:
         conv_dir = _redirect_conv_dir(tmp_path, monkeypatch)
         max_entries = mock_settings.MAX_CONVERSATION_HISTORY_TURNS * 2  # = 6
         turns = [{"role": "user", "content": f"x{i}"} for i in range(max_entries)]
-        _write_session(conv_dir, "exact-sess", turns)
+        _write_session(conv_dir, _UUID_EXACT, turns)
 
         from app.memory.conversation import load_conversation_history
-        result = load_conversation_history("exact-sess")
+        result = load_conversation_history(_UUID_EXACT)
         assert len(result) == max_entries
 
 
@@ -131,9 +147,9 @@ class TestSaveConversationTurn:
         conv_dir = _redirect_conv_dir(tmp_path, monkeypatch)
 
         from app.memory.conversation import save_conversation_turn
-        save_conversation_turn("new-sess", "hello?", "hi there", [])
+        save_conversation_turn(_UUID_NEW, "hello?", "hi there", [])
 
-        path = conv_dir / "new-sess.json"
+        path = conv_dir / f"{_UUID_NEW}.json"
         assert path.exists()
 
     def test_saved_content_contains_query_and_answer(self, tmp_path, monkeypatch):
@@ -141,9 +157,9 @@ class TestSaveConversationTurn:
         conv_dir = _redirect_conv_dir(tmp_path, monkeypatch)
 
         from app.memory.conversation import save_conversation_turn
-        save_conversation_turn("s1", "What is AI?", "AI is ...", [])
+        save_conversation_turn(_UUID_CONTENT, "What is AI?", "AI is ...", [])
 
-        data = json.loads((conv_dir / "s1.json").read_text(encoding="utf-8"))
+        data = json.loads((conv_dir / f"{_UUID_CONTENT}.json").read_text(encoding="utf-8"))
         assert {"role": "user", "content": "What is AI?"} in data
         assert any(
             e["role"] == "assistant" and "AI is ..." in e["content"] for e in data
@@ -152,15 +168,15 @@ class TestSaveConversationTurn:
     def test_appends_to_existing_session(self, tmp_path, monkeypatch):
         """Subsequent saves append new turns to the existing session."""
         conv_dir = _redirect_conv_dir(tmp_path, monkeypatch)
-        _write_session(conv_dir, "s2", [
+        _write_session(conv_dir, _UUID_APPEND_S2, [
             {"role": "user", "content": "first q"},
             {"role": "assistant", "content": "first a", "citations": []},
         ])
 
         from app.memory.conversation import save_conversation_turn
-        save_conversation_turn("s2", "second q", "second a", [])
+        save_conversation_turn(_UUID_APPEND_S2, "second q", "second a", [])
 
-        data = json.loads((conv_dir / "s2.json").read_text(encoding="utf-8"))
+        data = json.loads((conv_dir / f"{_UUID_APPEND_S2}.json").read_text(encoding="utf-8"))
         user_messages = [e["content"] for e in data if e["role"] == "user"]
         assert "first q" in user_messages
         assert "second q" in user_messages
@@ -171,9 +187,9 @@ class TestSaveConversationTurn:
         citations = [{"source_type": "vector", "title": "Doc A", "excerpt": "..."}]
 
         from app.memory.conversation import save_conversation_turn
-        save_conversation_turn("s3", "q", "a", citations)
+        save_conversation_turn(_UUID_CITE, "q", "a", citations)
 
-        data = json.loads((conv_dir / "s3.json").read_text(encoding="utf-8"))
+        data = json.loads((conv_dir / f"{_UUID_CITE}.json").read_text(encoding="utf-8"))
         assistant_entry = next(e for e in data if e["role"] == "assistant")
         assert assistant_entry["citations"] == citations
 
@@ -190,12 +206,12 @@ class TestSaveConversationTurn:
         for i in range(mock_settings.MAX_CONVERSATION_HISTORY_TURNS):
             existing.append({"role": "user", "content": f"q{i}"})
             existing.append({"role": "assistant", "content": f"a{i}", "citations": []})
-        _write_session(conv_dir, "trim-sess", existing)
+        _write_session(conv_dir, _UUID_TRIM, existing)
 
         from app.memory.conversation import save_conversation_turn
-        save_conversation_turn("trim-sess", "new q", "new a", [])
+        save_conversation_turn(_UUID_TRIM, "new q", "new a", [])
 
-        data = json.loads((conv_dir / "trim-sess.json").read_text(encoding="utf-8"))
+        data = json.loads((conv_dir / f"{_UUID_TRIM}.json").read_text(encoding="utf-8"))
         assert len(data) == max_entries
 
     def test_creates_conversations_directory_if_missing(self, tmp_path, monkeypatch):
@@ -204,7 +220,7 @@ class TestSaveConversationTurn:
         assert not conv_dir.exists()
 
         from app.memory.conversation import save_conversation_turn
-        save_conversation_turn("auto-dir-sess", "q", "a", [])
+        save_conversation_turn(_UUID_AUTODIR, "q", "a", [])
 
         assert conv_dir.exists()
 
@@ -213,11 +229,11 @@ class TestSaveConversationTurn:
         conv_dir = _redirect_conv_dir(tmp_path, monkeypatch)
 
         from app.memory.conversation import save_conversation_turn
-        save_conversation_turn("sess-A", "qa", "aa", [])
-        save_conversation_turn("sess-B", "qb", "ab", [])
+        save_conversation_turn(_UUID_SESS_A, "qa", "aa", [])
+        save_conversation_turn(_UUID_SESS_B, "qb", "ab", [])
 
-        data_a = json.loads((conv_dir / "sess-A.json").read_text(encoding="utf-8"))
-        data_b = json.loads((conv_dir / "sess-B.json").read_text(encoding="utf-8"))
+        data_a = json.loads((conv_dir / f"{_UUID_SESS_A}.json").read_text(encoding="utf-8"))
+        data_b = json.loads((conv_dir / f"{_UUID_SESS_B}.json").read_text(encoding="utf-8"))
 
         assert all(e["content"] in ("qa", "aa") for e in data_a)
         assert all(e["content"] in ("qb", "ab") for e in data_b)
@@ -227,8 +243,8 @@ class TestSaveConversationTurn:
         conv_dir = _redirect_conv_dir(tmp_path, monkeypatch)
 
         from app.memory.conversation import save_conversation_turn
-        save_conversation_turn("unicode-sess", "你好吗？", "我很好，谢谢！", [])
+        save_conversation_turn(_UUID_UNICODE, "你好吗？", "我很好，谢谢！", [])
 
-        data = json.loads((conv_dir / "unicode-sess.json").read_text(encoding="utf-8"))
+        data = json.loads((conv_dir / f"{_UUID_UNICODE}.json").read_text(encoding="utf-8"))
         assert any("你好吗？" in e.get("content", "") for e in data)
         assert any("我很好，谢谢！" in e.get("content", "") for e in data)

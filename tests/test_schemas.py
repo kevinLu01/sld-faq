@@ -82,11 +82,11 @@ class TestQueryRequest:
         with pytest.raises(ValidationError):
             s.QueryRequest()
 
-    def test_empty_query_string_accepted(self):
-        """Pydantic does not reject an empty string for 'query' by default."""
+    def test_empty_query_string_rejected(self):
+        """Empty string must be rejected after P0 fix added min_length=1."""
         s = _import_schemas()
-        req = s.QueryRequest(query="")
-        assert req.query == ""
+        with pytest.raises(ValidationError):
+            s.QueryRequest(query="")
 
     def test_negative_max_iterations_raises(self):
         """Negative value is below ge=1 and must be rejected."""
